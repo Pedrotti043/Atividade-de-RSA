@@ -1,0 +1,128 @@
+[package]
+name = "rsa_crypto"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rsa = "0.9"
+rand = "0.8"
+sha2 = "0.10"
+base64 = "0.21"
+
+use rsa::{
+    RsaPrivateKey, RsaPublicKey, Oaep, 
+    pkcs8::{EncodePrivateKey, LineEnding}, 
+    pkcs1::EncodePublicKey,
+    traits::PublicKeyParts
+};
+use rand::rngs::OsRng;
+use sha2::Sha256;
+use std::fs::File;
+use std::io::Write;
+use base64::{engine::general_purpose, Engine as _};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("=== Sistema de Criptografia RSA ===");
+    
+    // Gera par de chaves
+    let (private_key, public_key) = generate_keypair(2048)?;
+    
+    // Salva as chaves
+    save_private_key(&private_key, "chave_privada.pem")?;
+    save_public_key(&public_key, "chave_publica.pem")?;
+    
+    // Mensagem para criptografar
+    let mensagem = "Mensagem secreta: Hello RSA Crypto!";
+    println!("\n📝 Mensagem original: {}", mensagem);
+    
+    // Criptografa
+    let ciphertext_b64 = encrypt_message(&public_key, mensagem.as_bytes())?;
+    println!("🔒 Mensagem criptografada (base64): {}", ciphertext_b64);
+    
+    // Salva ciphertext
+    save_ciphertext(&ciphertext_b64, "mensagem_criptografada.b64")?;
+    
+    // Descriptografa
+    let decrypted_message = decrypt_message(&private_key, &ciphertext_b64)?;
+    println!("🔓 Mensagem descriptografada: {}", decrypted_message);
+    
+    // Verifica
+    if mensagem == decrypted_message {
+        println!("\n✅ Verificação bem-sucedida! A mensagem foi recuperada corretamente.");
+    } else {
+        println!("\n❌ Erro: A mensagem descriptografada não coincide com a original!");
+    }
+    
+    Ok(())
+}
+
+/// Gera um par de chaves RSA
+fn generate_keypair(bits: usize) -> Result<(RsaPrivateKey, RsaPublicKey), Box<dyn std::error::Error>> {
+    println!("🔑 Gerando par de chaves RSA ({} bits)...", bits);
+    let mut rng = OsRng;
+    
+    let private_key = RsaPrivateKey::new(&mut rng, bits)
+        .map_err(|e| format!("Erro ao gerar chave privada: {}", e))?;
+    
+    let public_key = RsaPublicKey::from(&private_key);
+    
+    println!("✅ Chaves geradas com sucesso!");
+    println!("   Tamanho do módulo: {} bits", public_key.n().bits());
+    println!("   Expoente público: {}", public_key.e());
+    
+    Ok((private_key, public_key))
+}
+
+/// Salva a chave privada em formato PEM
+fn save_private_key(private_key: &RsaPrivateKey, filename: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let pkcs8_pem = private_key.to_pkcs8_pem(LineEnding::LF)
+        .map_err(|e| format!("Erro ao serializar chave privada: {}", e))?;
+    
+    let mut file = File::create(filename)?;
+    file.write_all(pkcs8_pem.as_bytes())?;
+    println!("💾 Chave privada salva em: {}", filename);
+    Ok(())
+}
+
+/// Salva a chave pública em formato PEM
+fn save_public_key(public_key: &RsaPublicKey, filename: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let pub_pem = public_key.to_pkcs1_pem(LineEnding::LF)
+        .map_err(|e| format!("Erro ao serializar chave pública: {}", e))?;
+    
+    let mut file = File::create(filename)?;
+    file.write_all(pub_pem.as_bytes())?;
+    println!("💾 Chave pública salva em: {}", filename);
+    Ok(())
+}
+
+/// Criptografa uma mensagem usando RSA-OAEP
+fn encrypt_message(public_key: &RsaPublicKey, message: &[u8]) -> Result<String, Box<dyn std::error::Error>> {
+    let mut rng = OsRng;
+    let padding = Oaep::new::<Sha256>();
+    
+    let encrypted_data = public_key.encrypt(&mut rng, padding, message)
+        .map_err(|e| format!("Erro na criptografia: {}", e))?;
+    
+    Ok(general_purpose::STANDARD.encode(&encrypted_data))
+}
+
+/// Descriptografa uma mensagem usando RSA-OAEP
+fn decrypt_message(private_key: &RsaPrivateKey, encrypted_b64: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let encrypted_data = general_purpose::STANDARD.decode(encrypted_b64)
+        .map_err(|e| format!("Erro ao decodificar base64: {}", e))?;
+    
+    let padding = Oaep::new::<Sha256>();
+    let decrypted_data = private_key.decrypt(padding, &encrypted_data)
+        .map_err(|e| format!("Erro na descriptografia: {}", e))?;
+    
+    String::from_utf8(decrypted_data)
+        .map_err(|e| format!("Erro ao converter para UTF-8: {}", e).into())
+}
+
+/// Salva o texto cifrado em arquivo
+fn save_ciphertext(ciphertext: &str, filename: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let mut file = File::create(filename)?;
+    file.write_all(ciphertext.as_bytes())?;
+    println!("💾 Texto cifrado salvo em: {}", filename);
+    Ok(())
+}
